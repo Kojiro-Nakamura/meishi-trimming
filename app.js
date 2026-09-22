@@ -50,10 +50,18 @@ document.addEventListener('DOMContentLoaded', () => {
         return [tl, tr, br, bl];
     }
 
+    let debugTimeout = null;
     function logDebug(msg) {
         const el = document.getElementById('debug-status');
         if (el) {
-            el.innerText += msg + '\n';
+            el.innerText = msg;
+            el.style.opacity = '1';
+            el.style.transition = 'none';
+            if (debugTimeout) clearTimeout(debugTimeout);
+            debugTimeout = setTimeout(() => {
+                el.style.transition = 'opacity 1.5s ease-out';
+                el.style.opacity = '0';
+            }, 2500); // 2.5秒表示してフェードアウト
         }
         console.log(msg);
     }
@@ -519,12 +527,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // 保存ボタン (Perspective Correction実行)
     saveBtn.addEventListener('click', () => {
         // 出力サイズは名刺の比率 (91:55) に合わせる。
-        // ポイントの幅を基準に出力解像度を決定（最大長辺を1500px程度に制限）
+        // ポイントの幅を基準に出力解像度を決定（最大長辺を3000px程度に制限）
         const widthT = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y);
         const widthB = Math.hypot(points[2].x - points[3].x, points[2].y - points[3].y);
         const estWidth = Math.max(widthT, widthB);
         
-        let dstW = Math.min(Math.round(estWidth), 1500);
+        let dstW = Math.min(Math.round(estWidth), 3000);
         let dstH = Math.round(dstW * (55 / 91));
         
         // 縦向きの短冊のような選択領域なら縦向き名刺(55:91)にする
@@ -532,7 +540,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const heightR = Math.hypot(points[2].x - points[1].x, points[2].y - points[1].y);
         const estHeight = Math.max(heightL, heightR);
         if (estHeight > estWidth) {
-            dstH = Math.min(Math.round(estHeight), 1500);
+            dstH = Math.min(Math.round(estHeight), 3000);
             dstW = Math.round(dstH * (55 / 91));
         }
 
