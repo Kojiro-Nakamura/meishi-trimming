@@ -33,11 +33,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!file) return;
 
         originalFileName = file.name || 'business_card.jpg';
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            loadImage(event.target.result);
-        };
-        reader.readAsDataURL(file);
+        // メモリ不足によるSafariのリロードを防ぐため、FileReaderではなくObjectURLを使用
+        const objectUrl = URL.createObjectURL(file);
+        loadImage(objectUrl);
     });
 
     function loadImage(src) {
@@ -56,7 +54,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 {x: marginX, y: sourceImage.height - marginY} // Bottom-Left
             ];
 
-            resizeCanvas();
+            // DOMの表示が完了してからキャンバスサイズを計算するため少し遅延させる
+            setTimeout(resizeCanvas, 50);
         };
         sourceImage.src = src;
     }
@@ -213,6 +212,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 回転
     function rotateImage(angleDegrees) {
+        // 回転中の操作を防ぐ処理などを入れるとベターですが今回は同期的に近い速度で処理
         const offCanvas = document.createElement('canvas');
         const offCtx = offCanvas.getContext('2d');
         if (angleDegrees === 90 || angleDegrees === -270) {
@@ -227,7 +227,14 @@ document.addEventListener('DOMContentLoaded', () => {
             offCtx.rotate(-Math.PI / 2);
         }
         offCtx.drawImage(sourceImage, 0, 0);
-        loadImage(offCanvas.toDataURL('image/jpeg', 1.0));
+        
+        // DataURLはメモリを大量に消費するためBlobを使用
+        offCanvas.toBlob((blob) => {
+            if (blob) {
+                const objectUrl = URL.createObjectURL(blob);
+                loadImage(objectUrl);
+            }
+        }, 'image/jpeg', 0.9);
     }
 
     rotateLeftBtn.addEventListener('click', () => rotateImage(-90));
