@@ -96,6 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             let maxArea = 0;
             let maxContour = null;
+            let isMinAreaRect = false;
             let approx = new cv.Mat();
             const totalArea = resized.cols * resized.rows;
 
@@ -103,10 +104,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 let cnt = contours.get(i);
                 let area = cv.contourArea(cnt);
                 
-                // 画面全体の5%以上、99%未満の領域のみ（大きく写した名刺も弾かないように上限を緩和）
+                // 画面全体の5%以上、99%未満の領域のみ
                 if (area > totalArea * 0.05 && area < totalArea * 0.99) {
-                    
-                    // 指の写り込みや名刺の欠けを無視するため、輪郭を凸包（Convex Hull）で包む
                     let hull = new cv.Mat();
                     cv.convexHull(cnt, hull, false, true);
 
@@ -127,6 +126,15 @@ document.addEventListener('DOMContentLoaded', () => {
                             maxArea = area;
                             if (maxContour) maxContour.delete();
                             maxContour = approx.clone();
+                            isMinAreaRect = false;
+                        }
+                    } else {
+                        // 4角形が見つからなかった場合でも、面積が最大なら「最小外接矩形」をフォールバックとして保持
+                        if (area > maxArea) {
+                            maxArea = area;
+                            if (maxContour) maxContour.delete();
+                            maxContour = hull.clone();
+                            isMinAreaRect = true;
                         }
                     }
                     hull.delete();
@@ -137,11 +145,31 @@ document.addEventListener('DOMContentLoaded', () => {
             let foundPoints = null;
             if (maxContour) {
                 foundPoints = [];
-                for (let i = 0; i < 4; i++) {
-                    foundPoints.push({
-                        x: maxContour.data32S[i * 2] / scale,
-                        y: maxContour.data32S[i * 2 + 1] / scale
-                    });
+                if (!isMinAreaRect) {
+                    for (let i = 0; i < 4; i++) {
+                        foundPoints.push({
+                            x: maxContour.data32S[i * 2] / scale,
+                            y: maxContour.data32S[i * 2 + 1] / scale
+                        });
+                    }
+                } else {
+                    // 最小外接矩形 (RotatedRect) を計算して4隅を取得
+                    let rect = cv.minAreaRect(maxContour);
+                    // OpenCV.jsでのRotatedRect頂点計算
+                    let angle = rect.angle * Math.PI / 180.0;
+                    let b = Math.cos(angle) * 0.5;
+                    let a = Math.sin(angle) * 0.5;
+                    let pt0 = { x: rect.center.x - a * rect.size.height - b * rect.size.width,
+                                y: rect.center.y + b * rect.size.height - a * rect.size.width };
+                    let pt1 = { x: rect.center.x + a * rect.size.height - b * rect.size.width,
+                                y: rect.center.y - b * rect.size.height - a * rect.size.width };
+                    let pt2 = { x: 2 * rect.center.x - pt0.x, y: 2 * rect.center.y - pt0.y };
+                    let pt3 = { x: 2 * rect.center.x - pt1.x, y: 2 * rect.center.y - pt1.y };
+                    
+                    foundPoints = [pt0, pt1, pt2, pt3].map(p => ({
+                        x: p.x / scale,
+                        y: p.y / scale
+                    }));
                 }
                 maxContour.delete();
             }
@@ -176,11 +204,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 {x: marginX, y: sourceImage.height - marginY} // Bottom-Left
             ];
 
-            // 自動認識に挑戦
-            const detectedPoints = detectDocument(sourceImage);
-            if (detectedPoints) {
-                points = detectedPoints;
-            }
+            // OpenCVのロードが遅れている場合を考慮し、リトライ付きで自動認識を実行
+            const tryDetect = (retries) => {
+                if (typeof cv === 'undefined' || !cv.Mat || !cv.imread) {
+                    if (retries > 0) {
+                        setTimeout(() => tryDetect(retries - 1), 500);
+                    }
+                    return;
+                }
+                const detectedPoints = detectDocument(sourceImage);
+                if (detectedPoints) {
+                    points = detectedPoints;
+                    // 非同期でポイントが更新された場合、再描画
+                    if (editorView.classList.contains('active')) {
+                        drawEditor();
+                    }
+                }
+            };
+            
+            tryDetect(6); // 最大3秒間待機してOpenCVをロード
 
             // DOMの表示が完了してからキャンバスサイズを計算するため少し遅延させる
             setTimeout(resizeCanvas, 50);
@@ -247,14 +289,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 頂点を描画
         const dpr = window.devicePixelRatio || 1;
-        const radius = 20 * dpr; // 見た目をさらに大きくする (40px相当)
+        const radius = 10 * dpr; // 見た目のサイズを元に戻す
         for (let i = 0; i < points.length; i++) {
             const p = imgToCanvas(points[i]);
             ctx.beginPath();
             ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
             ctx.fillStyle = (i === draggingPointIndex) ? '#ff3b30' : '#ffffff';
             ctx.fill();
-            ctx.lineWidth = 4 * dpr;
+            ctx.lineWidth = 3 * dpr;
             ctx.strokeStyle = '#007aff';
             ctx.stroke();
         }
