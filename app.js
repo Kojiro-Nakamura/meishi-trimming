@@ -188,34 +188,43 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function loadImage(src) {
+    function loadImage(src, manualPoints = null) {
         sourceImage.onload = () => {
             initialView.classList.remove('active');
             resultView.classList.remove('active');
             editorView.classList.add('active');
 
-            // 4隅のポイントを初期化 (フォールバック用)
-            const marginX = sourceImage.width * 0.1;
-            const marginY = sourceImage.height * 0.1;
-            points = [
-                {x: marginX, y: marginY}, // Top-Left
-                {x: sourceImage.width - marginX, y: marginY}, // Top-Right
-                {x: sourceImage.width - marginX, y: sourceImage.height - marginY}, // Bottom-Right
-                {x: marginX, y: sourceImage.height - marginY} // Bottom-Left
-            ];
-
-            logDebug("Image loaded.");
-            
-            // OpenCV依存を無くしたため、すぐに同期的/非同期的に実行可能
-            setTimeout(() => {
-                const detectedPoints = detectDocument(sourceImage);
-                if (detectedPoints) {
-                    points = detectedPoints;
-                    if (editorView.classList.contains('active')) {
-                        drawEditor();
-                    }
+            if (manualPoints) {
+                // 回転時などは既存のポイントを維持する
+                points = manualPoints;
+                logDebug("Image rotated.");
+                if (editorView.classList.contains('active')) {
+                    drawEditor();
                 }
-            }, 10);
+            } else {
+                // 4隅のポイントを初期化 (フォールバック用)
+                const marginX = sourceImage.width * 0.1;
+                const marginY = sourceImage.height * 0.1;
+                points = [
+                    {x: marginX, y: marginY}, // Top-Left
+                    {x: sourceImage.width - marginX, y: marginY}, // Top-Right
+                    {x: sourceImage.width - marginX, y: sourceImage.height - marginY}, // Bottom-Right
+                    {x: marginX, y: sourceImage.height - marginY} // Bottom-Left
+                ];
+
+                logDebug("Image loaded.");
+                
+                // 初回読み込み時は自動認識を実行
+                setTimeout(() => {
+                    const detectedPoints = detectDocument(sourceImage);
+                    if (detectedPoints) {
+                        points = detectedPoints;
+                        if (editorView.classList.contains('active')) {
+                            drawEditor();
+                        }
+                    }
+                }, 10);
+            }
 
             // DOMの表示が完了してからキャンバスサイズを計算するため少し遅延させる
             setTimeout(resizeCanvas, 50);
@@ -379,27 +388,40 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 回転
     function rotateImage(angleDegrees) {
-        // 回転中の操作を防ぐ処理などを入れるとベターですが今回は同期的に近い速度で処理
         const offCanvas = document.createElement('canvas');
         const offCtx = offCanvas.getContext('2d');
+        const w = sourceImage.width;
+        const h = sourceImage.height;
+        let newPoints = null;
+
         if (angleDegrees === 90 || angleDegrees === -270) {
-            offCanvas.width = sourceImage.height;
-            offCanvas.height = sourceImage.width;
+            offCanvas.width = h;
+            offCanvas.height = w;
             offCtx.translate(offCanvas.width, 0);
             offCtx.rotate(Math.PI / 2);
+            // Rotate points +90 deg: (x, y) -> (h - y, x)
+            newPoints = points.map(p => ({ x: h - p.y, y: p.x }));
         } else if (angleDegrees === -90 || angleDegrees === 270) {
-            offCanvas.width = sourceImage.height;
-            offCanvas.height = sourceImage.width;
+            offCanvas.width = h;
+            offCanvas.height = w;
             offCtx.translate(0, offCanvas.height);
             offCtx.rotate(-Math.PI / 2);
+            // Rotate points -90 deg: (x, y) -> (y, w - x)
+            newPoints = points.map(p => ({ x: p.y, y: w - p.x }));
         }
+        
+        // 回転に合わせて頂点の順番を正しく保つ (Top-Left, Top-Right, Bottom-Right, Bottom-Left)
+        if (newPoints) {
+            newPoints = sortPoints(newPoints);
+        }
+
         offCtx.drawImage(sourceImage, 0, 0);
         
         // DataURLはメモリを大量に消費するためBlobを使用
         offCanvas.toBlob((blob) => {
             if (blob) {
                 const objectUrl = URL.createObjectURL(blob);
-                loadImage(objectUrl);
+                loadImage(objectUrl, newPoints);
             }
         }, 'image/jpeg', 0.9);
     }
@@ -527,12 +549,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // 保存ボタン (Perspective Correction実行)
     saveBtn.addEventListener('click', () => {
         // 出力サイズは名刺の比率 (91:55) に合わせる。
-        // ポイントの幅を基準に出力解像度を決定（最大長辺を3000px程度に制限）
+        // ポイントの幅を基準に出力解像度を決定（最大長辺を4500pxに制限して1200万画素をカバー）
         const widthT = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y);
         const widthB = Math.hypot(points[2].x - points[3].x, points[2].y - points[3].y);
         const estWidth = Math.max(widthT, widthB);
         
-        let dstW = Math.min(Math.round(estWidth), 3000);
+        let dstW = Math.min(Math.round(estWidth), 4500);
         let dstH = Math.round(dstW * (55 / 91));
         
         // 縦向きの短冊のような選択領域なら縦向き名刺(55:91)にする
@@ -540,7 +562,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const heightR = Math.hypot(points[2].x - points[1].x, points[2].y - points[1].y);
         const estHeight = Math.max(heightL, heightR);
         if (estHeight > estWidth) {
-            dstH = Math.min(Math.round(estHeight), 3000);
+            dstH = Math.min(Math.round(estHeight), 4500);
             dstW = Math.round(dstH * (55 / 91));
         }
 
