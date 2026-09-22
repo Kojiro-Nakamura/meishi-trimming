@@ -80,7 +80,7 @@ main {
     background-color: #000;
 }
 
-.cropper-container {
+.editor-container {
     flex: 1;
     width: 100%;
     overflow: hidden;
@@ -88,12 +88,14 @@ main {
     display: flex;
     justify-content: center;
     align-items: center;
+    background-color: #000;
 }
 
-img#image-to-crop {
+#editor-canvas {
     max-width: 100%;
     max-height: 100%;
-    display: block; /* imgのデフォルトの隙間を消す */
+    /* Canvas自体のドラッグスクロールやズームを防止 */
+    touch-action: none; 
 }
 
 /* Result View Styles */
