@@ -124,6 +124,9 @@ img#cropped-result {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     /* iOSの長押し保存メニューを出しやすくする */
     -webkit-touch-callout: default;
+    /* プレビュー表示時の縮小エイリアス（ジャギー）を防ぎなめらかに表示する */
+    image-rendering: high-quality;
+    image-rendering: -webkit-optimize-contrast;
 }
 
 .controls {

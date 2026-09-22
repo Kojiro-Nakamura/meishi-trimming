@@ -570,17 +570,34 @@ document.addEventListener('DOMContentLoaded', () => {
         const widthB = Math.hypot(points[2].x - points[3].x, points[2].y - points[3].y);
         const estWidth = Math.max(widthT, widthB);
         
-        // 解像度を元のピクセルからさらに1.5倍にオーバーサンプリングしてジャギーを防ぐ
-        let dstW = Math.min(Math.round(estWidth * 1.5), 4500);
+        // 解像度は写真上のピクセルと1:1になるように計算（アップスケールによるボヤケを防ぐ）
+        let dstW = Math.min(Math.round(estWidth), 4500);
         let dstH = Math.round(dstW * (55 / 91));
         
         const heightL = Math.hypot(points[3].x - points[0].x, points[3].y - points[0].y);
         const heightR = Math.hypot(points[2].x - points[1].x, points[2].y - points[1].y);
         const estHeight = Math.max(heightL, heightR);
         if (estHeight > estWidth) {
-            dstH = Math.min(Math.round(estHeight * 1.5), 4500);
+            dstH = Math.min(Math.round(estHeight), 4500);
             dstW = Math.round(dstH * (55 / 91));
         }
+
+        const src = fullResBitmap || sourceImage;
+        
+        // メモリ節約のため、全画面ではなく名刺の「バウンディングボックス」だけを切り出す
+        const minX = Math.max(0, Math.floor(Math.min(points[0].x, points[1].x, points[2].x, points[3].x)));
+        const maxX = Math.min(src.width, Math.ceil(Math.max(points[0].x, points[1].x, points[2].x, points[3].x)));
+        const minY = Math.max(0, Math.floor(Math.min(points[0].y, points[1].y, points[2].y, points[3].y)));
+        const maxY = Math.min(src.height, Math.ceil(Math.max(points[0].y, points[1].y, points[2].y, points[3].y)));
+        
+        const boxW = maxX - minX;
+        const boxH = maxY - minY;
+
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = boxW;
+        tempCanvas.height = boxH;
+        // バウンディングボックス部分だけを等倍でコピー
+        tempCanvas.getContext('2d').drawImage(src, minX, minY, boxW, boxH, 0, 0, boxW, boxH);
 
         const dstPts = [
             {x: 0, y: 0},
@@ -588,43 +605,14 @@ document.addEventListener('DOMContentLoaded', () => {
             {x: dstW, y: dstH},
             {x: 0, y: dstH}
         ];
-        
-        const H = getPerspectiveTransform(points, dstPts);
 
-        const src = fullResBitmap || sourceImage;
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = src.width;
-        tempCanvas.height = src.height;
-        tempCanvas.getContext('2d').drawImage(src, 0, 0);
+        // バウンディングボックスの座標系に合わせて射影変換行列を調整
+        const localPoints = points.map(p => ({ x: p.x - minX, y: p.y - minY }));
+        const H = getPerspectiveTransform(localPoints, dstPts);
 
         setTimeout(() => {
             const warpedCanvas = warpPerspective(tempCanvas, dstW, dstH, H);
             
-            // クッキリとした書類にするためのシャープネス処理（アンシャープマスク）
-            const ctx = warpedCanvas.getContext('2d');
-            const imgData = ctx.getImageData(0, 0, dstW, dstH);
-            const data = imgData.data;
-            const w = dstW;
-            const h = dstH;
-            
-            // 簡単な 3x3 シャープネスフィルタ
-            const sharpData = new Uint8ClampedArray(data);
-            for (let y = 1; y < h - 1; y++) {
-                for (let x = 1; x < w - 1; x++) {
-                    const idx = (y * w + x) * 4;
-                    for (let c = 0; c < 3; c++) {
-                        const top = ((y - 1) * w + x) * 4 + c;
-                        const left = (y * w + (x - 1)) * 4 + c;
-                        const right = (y * w + (x + 1)) * 4 + c;
-                        const bottom = ((y + 1) * w + x) * 4 + c;
-                        
-                        const val = data[idx+c] * 5 - data[top] - data[left] - data[right] - data[bottom];
-                        sharpData[idx+c] = val;
-                    }
-                }
-            }
-            ctx.putImageData(new ImageData(sharpData, w, h), 0, 0);
-
             warpedCanvas.toBlob((blob) => {
                 if (blob) {
                     if (currentDataUrl) URL.revokeObjectURL(currentDataUrl);
