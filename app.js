@@ -79,6 +79,11 @@ document.addEventListener('DOMContentLoaded', () => {
             let edges = new cv.Mat();
             cv.Canny(gray, edges, 75, 200);
 
+            // 輪郭を閉じて繋がりを良くする (Morphological Close)
+            let M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
+            cv.morphologyEx(edges, edges, cv.MORPH_CLOSE, M);
+            M.delete();
+
             // 輪郭検出
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
@@ -87,16 +92,27 @@ document.addEventListener('DOMContentLoaded', () => {
             let maxArea = 0;
             let maxContour = null;
             let approx = new cv.Mat();
+            const totalArea = resized.cols * resized.rows;
 
             for (let i = 0; i < contours.size(); ++i) {
                 let cnt = contours.get(i);
                 let area = cv.contourArea(cnt);
-                // ある程度大きい領域のみ
-                if (area > 5000) {
+                
+                // 画面全体の5%以上、95%未満の領域のみ（画面全体の枠を誤認識するのを防ぐ）
+                if (area > totalArea * 0.05 && area < totalArea * 0.95) {
                     let perimeter = cv.arcLength(cnt, true);
-                    cv.approxPolyDP(cnt, approx, 0.02 * perimeter, true);
-                    // 四角形の場合
-                    if (approx.rows === 4) {
+                    let found4 = false;
+                    
+                    // 精度を変えながら4角形になるか試行する
+                    for (let ep = 0.01; ep <= 0.1; ep += 0.01) {
+                        cv.approxPolyDP(cnt, approx, ep * perimeter, true);
+                        if (approx.rows === 4) {
+                            found4 = true;
+                            break;
+                        }
+                    }
+                    
+                    if (found4) {
                         if (area > maxArea) {
                             maxArea = area;
                             if (maxContour) maxContour.delete();
