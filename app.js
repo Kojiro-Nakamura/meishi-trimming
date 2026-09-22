@@ -82,7 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // エッジ検出
             let edges = new cv.Mat();
-            cv.Canny(gray, edges, 75, 200);
+            cv.Canny(gray, edges, 50, 150);
 
             // 輪郭を閉じて繋がりを良くする (Morphological Close)
             let M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
@@ -103,14 +103,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 let cnt = contours.get(i);
                 let area = cv.contourArea(cnt);
                 
-                // 画面全体の5%以上、95%未満の領域のみ（画面全体の枠を誤認識するのを防ぐ）
-                if (area > totalArea * 0.05 && area < totalArea * 0.95) {
-                    let perimeter = cv.arcLength(cnt, true);
+                // 画面全体の5%以上、99%未満の領域のみ（大きく写した名刺も弾かないように上限を緩和）
+                if (area > totalArea * 0.05 && area < totalArea * 0.99) {
+                    
+                    // 指の写り込みや名刺の欠けを無視するため、輪郭を凸包（Convex Hull）で包む
+                    let hull = new cv.Mat();
+                    cv.convexHull(cnt, hull, false, true);
+
+                    let perimeter = cv.arcLength(hull, true);
                     let found4 = false;
                     
                     // 精度を変えながら4角形になるか試行する
-                    for (let ep = 0.01; ep <= 0.1; ep += 0.01) {
-                        cv.approxPolyDP(cnt, approx, ep * perimeter, true);
+                    for (let ep = 0.01; ep <= 0.15; ep += 0.01) {
+                        cv.approxPolyDP(hull, approx, ep * perimeter, true);
                         if (approx.rows === 4) {
                             found4 = true;
                             break;
@@ -124,6 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             maxContour = approx.clone();
                         }
                     }
+                    hull.delete();
                 }
                 cnt.delete();
             }
@@ -241,14 +247,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 頂点を描画
         const dpr = window.devicePixelRatio || 1;
-        const radius = 15 * dpr; // 見た目を少し大きくする
+        const radius = 20 * dpr; // 見た目をさらに大きくする (40px相当)
         for (let i = 0; i < points.length; i++) {
             const p = imgToCanvas(points[i]);
             ctx.beginPath();
             ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
             ctx.fillStyle = (i === draggingPointIndex) ? '#ff3b30' : '#ffffff';
             ctx.fill();
-            ctx.lineWidth = 3 * dpr;
+            ctx.lineWidth = 4 * dpr;
             ctx.strokeStyle = '#007aff';
             ctx.stroke();
         }
@@ -288,10 +294,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const pos = getPointerPos(e);
         const imgPos = canvasToImg(pos.x, pos.y);
         
-        // 最も近いポイントを探す (当たり判定)
-        // タッチ操作しやすいように当たり判定をかなり大きめにとる (CSSピクセルで40px相当 -> 直径80px)
+        // 当たり判定をさらに特大に拡大（CSSピクセルで80px相当 -> 直径160px）
         const dpr = window.devicePixelRatio || 1;
-        const threshold = (40 * dpr) / displayScale; 
+        const threshold = (80 * dpr) / displayScale; 
         let minDist = Infinity;
         let closestIndex = -1;
         
@@ -307,6 +312,8 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (closestIndex !== -1) {
             draggingPointIndex = closestIndex;
+            // 触れた瞬間にポイントを指の位置に吸着させる (操作感が劇的に改善)
+            points[draggingPointIndex] = imgPos;
             drawEditor();
         }
     }
