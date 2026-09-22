@@ -582,14 +582,23 @@ document.addEventListener('DOMContentLoaded', () => {
         tempCanvas.height = sourceImage.height;
         tempCanvas.getContext('2d').drawImage(sourceImage, 0, 0);
 
-        // 「処理中...」の表示等をしたいところだが、今回は同期的で約数十〜数百msで終わる
+        // 「処理中...」の表示等をしたいところだが、今回は同期的に数１０〜数１００msで終わる
         setTimeout(() => {
             const warpedCanvas = warpPerspective(tempCanvas, dstW, dstH, H);
-            currentDataUrl = warpedCanvas.toDataURL('image/jpeg', 0.9);
             
-            croppedResultImg.src = currentDataUrl;
-            editorView.classList.remove('active');
-            resultView.classList.add('active');
+            // Base64 (toDataURL) だとiOS Safariのメモリ制限に引っかかり、
+            // プレビュー表示時にブラウザが勝手に低画質化（サブサンプリング）してしまうため、
+            // toBlob と Object URL を使ってフル解像度を維持する。画質も0.95にアップ。
+            warpedCanvas.toBlob((blob) => {
+                if (blob) {
+                    if (currentDataUrl) URL.revokeObjectURL(currentDataUrl); // メモリ解放
+                    currentDataUrl = URL.createObjectURL(blob);
+                    
+                    croppedResultImg.src = currentDataUrl;
+                    editorView.classList.remove('active');
+                    resultView.classList.add('active');
+                }
+            }, 'image/jpeg', 0.98);
         }, 10);
     });
 
