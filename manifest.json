@@ -1,0 +1,8 @@
+{
+  "name": "名刺スキャナ",
+  "short_name": "名刺スキャナ",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#1c1c1e"
+}

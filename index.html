@@ -7,17 +7,18 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="名刺スキャナ">
-    <!-- キャッシュ対策 -->
+    <link rel="manifest" href="manifest.json">
+    <!-- キャッシュ対策 (Service Worker導入に伴い、通常のブラウザキャッシュ設定は不要になりますが念のため残します) -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>名刺トリミング</title>
-    <link rel="stylesheet" href="style.css?v=1.0.10">
+    <link rel="stylesheet" href="style.css?v=1.0.11">
 </head>
 <body>
     <div class="app-container">
         <header>
-            <h1>名刺スキャナ <span style="font-size: 12px; color: #8e8e93; font-weight: normal;">ver 1.0.10</span></h1>
+            <h1>名刺スキャナ <span style="font-size: 12px; color: #8e8e93; font-weight: normal;">ver 1.0.11</span></h1>
         </header>
         
         <main>
@@ -65,6 +66,20 @@
     </div>
 
     <!-- 軽量化のためOpenCVへの依存を完全に排除し、PureJSで実装 -->
-    <script src="app.js?v=1.0.10"></script>
+    <script src="app.js?v=1.0.11"></script>
+    <script>
+        // 完全オフライン動作のための Service Worker 登録
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(registration => {
+                        console.log('ServiceWorker registration successful with scope: ', registration.scope);
+                    })
+                    .catch(error => {
+                        console.log('ServiceWorker registration failed: ', error);
+                    });
+            });
+        }
+    </script>
 </body>
 </html>
