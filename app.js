@@ -51,25 +51,30 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function detectDocument(imgElement) {
-        // OpenCVが未ロード、またはエラーの場合はnullを返す
-        if (typeof cv === 'undefined' || !cv.Mat) {
+        // OpenCVが完全に初期化されていない場合はスキップ
+        if (typeof cv === 'undefined' || !cv.Mat || !cv.imread) {
+            console.warn("OpenCV is not ready yet.");
             return null;
         }
 
         try {
-            let src = cv.imread(imgElement);
-            
-            // 処理高速化のため画像をダウンサンプリング
+            // メモリ制限(iOS Safari)を回避するため、OpenCVに渡す前にCanvasで縮小する
             let maxDim = 800;
             let scale = 1.0;
-            let resized = new cv.Mat();
-            if (src.cols > maxDim || src.rows > maxDim) {
-                scale = maxDim / Math.max(src.cols, src.rows);
-                cv.resize(src, resized, new cv.Size(0, 0), scale, scale, cv.INTER_AREA);
-            } else {
-                src.copyTo(resized);
+            if (imgElement.width > maxDim || imgElement.height > maxDim) {
+                scale = maxDim / Math.max(imgElement.width, imgElement.height);
             }
+            
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = imgElement.width * scale;
+            tempCanvas.height = imgElement.height * scale;
+            const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+            tempCtx.drawImage(imgElement, 0, 0, tempCanvas.width, tempCanvas.height);
 
+            // 縮小済みのCanvasからOpenCVのMatを生成 (超軽量・高速)
+            let src = cv.imread(tempCanvas);
+            let resized = src; // すでにリサイズ済みなのでそのまま使用
+            
             let gray = new cv.Mat();
             cv.cvtColor(resized, gray, cv.COLOR_RGBA2GRAY, 0);
             // ノイズ除去
@@ -136,7 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // メモリ解放
-            src.delete(); resized.delete(); gray.delete(); edges.delete();
+            src.delete(); gray.delete(); edges.delete();
             contours.delete(); hierarchy.delete(); approx.delete();
 
             if (foundPoints) {
@@ -235,14 +240,15 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.fill();
 
         // 頂点を描画
-        const radius = 10 * (window.devicePixelRatio || 1);
+        const dpr = window.devicePixelRatio || 1;
+        const radius = 15 * dpr; // 見た目を少し大きくする
         for (let i = 0; i < points.length; i++) {
             const p = imgToCanvas(points[i]);
             ctx.beginPath();
             ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
             ctx.fillStyle = (i === draggingPointIndex) ? '#ff3b30' : '#ffffff';
             ctx.fill();
-            ctx.lineWidth = 3 * (window.devicePixelRatio || 1);
+            ctx.lineWidth = 3 * dpr;
             ctx.strokeStyle = '#007aff';
             ctx.stroke();
         }
@@ -283,7 +289,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const imgPos = canvasToImg(pos.x, pos.y);
         
         // 最も近いポイントを探す (当たり判定)
-        const threshold = 40 / displayScale; // ドラッグしやすくするため少し広め
+        // タッチ操作しやすいように当たり判定をかなり大きめにとる (CSSピクセルで40px相当 -> 直径80px)
+        const dpr = window.devicePixelRatio || 1;
+        const threshold = (40 * dpr) / displayScale; 
         let minDist = Infinity;
         let closestIndex = -1;
         
