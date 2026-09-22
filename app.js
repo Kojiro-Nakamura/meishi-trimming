@@ -50,14 +50,23 @@ document.addEventListener('DOMContentLoaded', () => {
         return [tl, tr, br, bl];
     }
 
+    function logDebug(msg) {
+        const el = document.getElementById('debug-status');
+        if (el) {
+            el.innerText += msg + '\n';
+        }
+        console.log(msg);
+    }
+
     function detectDocument(imgElement) {
         // OpenCVが完全に初期化されていない場合はスキップ
         if (typeof cv === 'undefined' || !cv.Mat || !cv.imread) {
-            console.warn("OpenCV is not ready yet.");
+            logDebug("OpenCV is not ready yet.");
             return null;
         }
 
         try {
+            logDebug("Start detecting...");
             // メモリ制限(iOS Safari)を回避するため、OpenCVに渡す前にCanvasで縮小する
             let maxDim = 800;
             let scale = 1.0;
@@ -80,9 +89,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // ノイズ除去
             cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
 
-            // エッジ検出
+            // 二値化 (Otsu's Thresholding)
+            // 白黒がはっきりしている環境（黒い下地に白い名刺など）で非常に強力
             let edges = new cv.Mat();
-            cv.Canny(gray, edges, 50, 150);
+            cv.threshold(gray, edges, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU);
 
             // 輪郭を閉じて繋がりを良くする (Morphological Close)
             let M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
@@ -100,6 +110,8 @@ document.addEventListener('DOMContentLoaded', () => {
             let approx = new cv.Mat();
             const totalArea = resized.cols * resized.rows;
 
+            logDebug(`Found ${contours.size()} contours`);
+
             for (let i = 0; i < contours.size(); ++i) {
                 let cnt = contours.get(i);
                 let area = cv.contourArea(cnt);
@@ -107,34 +119,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 画面全体の5%以上、99%未満の領域のみ
                 if (area > totalArea * 0.05 && area < totalArea * 0.99) {
                     let hull = new cv.Mat();
-                    cv.convexHull(cnt, hull, false, true);
+                    // cntのポイントが3未満だとconvexHullがエラーを吐くのでガード
+                    if (cnt.rows >= 3) {
+                        cv.convexHull(cnt, hull, false, true);
 
-                    let perimeter = cv.arcLength(hull, true);
-                    let found4 = false;
-                    
-                    // 精度を変えながら4角形になるか試行する
-                    for (let ep = 0.01; ep <= 0.15; ep += 0.01) {
-                        cv.approxPolyDP(hull, approx, ep * perimeter, true);
-                        if (approx.rows === 4) {
-                            found4 = true;
-                            break;
+                        let perimeter = cv.arcLength(hull, true);
+                        let found4 = false;
+                        
+                        // 精度を変えながら4角形になるか試行する
+                        for (let ep = 0.01; ep <= 0.15; ep += 0.01) {
+                            cv.approxPolyDP(hull, approx, ep * perimeter, true);
+                            if (approx.rows === 4) {
+                                found4 = true;
+                                break;
+                            }
                         }
-                    }
-                    
-                    if (found4) {
-                        if (area > maxArea) {
-                            maxArea = area;
-                            if (maxContour) maxContour.delete();
-                            maxContour = approx.clone();
-                            isMinAreaRect = false;
-                        }
-                    } else {
-                        // 4角形が見つからなかった場合でも、面積が最大なら「最小外接矩形」をフォールバックとして保持
-                        if (area > maxArea) {
-                            maxArea = area;
-                            if (maxContour) maxContour.delete();
-                            maxContour = hull.clone();
-                            isMinAreaRect = true;
+                        
+                        if (found4) {
+                            if (area > maxArea) {
+                                maxArea = area;
+                                if (maxContour) maxContour.delete();
+                                maxContour = approx.clone();
+                                isMinAreaRect = false;
+                            }
+                        } else {
+                            // 4角形が見つからなかった場合でも、面積が最大なら「最小外接矩形」をフォールバックとして保持
+                            if (area > maxArea) {
+                                maxArea = area;
+                                if (maxContour) maxContour.delete();
+                                maxContour = hull.clone();
+                                isMinAreaRect = true;
+                            }
                         }
                     }
                     hull.delete();
@@ -146,6 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (maxContour) {
                 foundPoints = [];
                 if (!isMinAreaRect) {
+                    logDebug(`Using 4-point approx. Area: ${Math.round(maxArea)}`);
                     for (let i = 0; i < 4; i++) {
                         foundPoints.push({
                             x: maxContour.data32S[i * 2] / scale,
@@ -153,9 +169,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         });
                     }
                 } else {
-                    // 最小外接矩形 (RotatedRect) を計算して4隅を取得
+                    logDebug(`Using minAreaRect. Area: ${Math.round(maxArea)}`);
                     let rect = cv.minAreaRect(maxContour);
-                    // OpenCV.jsでのRotatedRect頂点計算
                     let angle = rect.angle * Math.PI / 180.0;
                     let b = Math.cos(angle) * 0.5;
                     let a = Math.sin(angle) * 0.5;
@@ -172,6 +187,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     }));
                 }
                 maxContour.delete();
+            } else {
+                logDebug("No contour met size criteria");
             }
 
             // メモリ解放
@@ -183,6 +200,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             return null;
         } catch (err) {
+            logDebug("OpenCV err: " + err);
             console.error("OpenCV detection failed", err);
             return null;
         }
@@ -208,21 +226,28 @@ document.addEventListener('DOMContentLoaded', () => {
             const tryDetect = (retries) => {
                 if (typeof cv === 'undefined' || !cv.Mat || !cv.imread) {
                     if (retries > 0) {
-                        setTimeout(() => tryDetect(retries - 1), 500);
+                        logDebug(`Waiting for OpenCV... (${retries})`);
+                        setTimeout(() => tryDetect(retries - 1), 1000);
+                    } else {
+                        logDebug("OpenCV load timeout.");
                     }
                     return;
                 }
                 const detectedPoints = detectDocument(sourceImage);
                 if (detectedPoints) {
                     points = detectedPoints;
+                    logDebug("Auto-crop success!");
                     // 非同期でポイントが更新された場合、再描画
                     if (editorView.classList.contains('active')) {
                         drawEditor();
                     }
+                } else {
+                    logDebug("Auto-crop found nothing.");
                 }
             };
             
-            tryDetect(6); // 最大3秒間待機してOpenCVをロード
+            logDebug("Image loaded.");
+            tryDetect(10); // 最大10秒間待機してOpenCVをロード
 
             // DOMの表示が完了してからキャンバスサイズを計算するため少し遅延させる
             setTimeout(resizeCanvas, 50);
