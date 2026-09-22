@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let originalFileName = 'business_card.jpg';
     let currentDataUrl = null;
     let sourceImage = new Image();
+    let fullResBitmap = null; // 高解像度ピクセルを保持
 
     // Editor state
     let points = []; // [{x, y}] in image coordinates
@@ -28,11 +29,21 @@ document.addEventListener('DOMContentLoaded', () => {
     let offsetY = 0;
 
     // ファイル選択
-    imageInput.addEventListener('change', (e) => {
+    imageInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
 
         originalFileName = file.name || 'business_card.jpg';
+        
+        try {
+            if (window.createImageBitmap) {
+                if (fullResBitmap) fullResBitmap.close && fullResBitmap.close();
+                fullResBitmap = await createImageBitmap(file);
+            }
+        } catch(err) {
+            console.error("createImageBitmap failed", err);
+        }
+
         // メモリ不足によるSafariのリロードを防ぐため、FileReaderではなくObjectURLを使用
         const objectUrl = URL.createObjectURL(file);
         loadImage(objectUrl);
@@ -388,10 +399,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 回転
     function rotateImage(angleDegrees) {
+        const src = fullResBitmap || sourceImage;
         const offCanvas = document.createElement('canvas');
         const offCtx = offCanvas.getContext('2d');
-        const w = sourceImage.width;
-        const h = sourceImage.height;
+        const w = src.width;
+        const h = src.height;
         let newPoints = null;
 
         if (angleDegrees === 90 || angleDegrees === -270) {
@@ -399,31 +411,35 @@ document.addEventListener('DOMContentLoaded', () => {
             offCanvas.height = w;
             offCtx.translate(offCanvas.width, 0);
             offCtx.rotate(Math.PI / 2);
-            // Rotate points +90 deg: (x, y) -> (h - y, x)
+            // Rotate points +90 deg for UI coordinates (note: points are relative to sourceImage display size, but we use src width/height here which is the same ratio)
             newPoints = points.map(p => ({ x: h - p.y, y: p.x }));
         } else if (angleDegrees === -90 || angleDegrees === 270) {
             offCanvas.width = h;
             offCanvas.height = w;
             offCtx.translate(0, offCanvas.height);
             offCtx.rotate(-Math.PI / 2);
-            // Rotate points -90 deg: (x, y) -> (y, w - x)
             newPoints = points.map(p => ({ x: p.y, y: w - p.x }));
         }
         
-        // 回転に合わせて頂点の順番を正しく保つ (Top-Left, Top-Right, Bottom-Right, Bottom-Left)
         if (newPoints) {
             newPoints = sortPoints(newPoints);
         }
 
-        offCtx.drawImage(sourceImage, 0, 0);
+        offCtx.drawImage(src, 0, 0);
         
-        // DataURLはメモリを大量に消費するためBlobを使用
-        offCanvas.toBlob((blob) => {
+        offCanvas.toBlob(async (blob) => {
             if (blob) {
+                try {
+                    if (window.createImageBitmap) {
+                        const newBmp = await createImageBitmap(blob);
+                        if (fullResBitmap) fullResBitmap.close && fullResBitmap.close();
+                        fullResBitmap = newBmp;
+                    }
+                } catch(e) {}
                 const objectUrl = URL.createObjectURL(blob);
                 loadImage(objectUrl, newPoints);
             }
-        }, 'image/jpeg', 0.9);
+        }, 'image/jpeg', 0.98);
     }
 
     rotateLeftBtn.addEventListener('click', () => rotateImage(-90));
@@ -577,10 +593,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const H = getPerspectiveTransform(points, dstPts);
 
         // 高速化のため、ソース画像を一時キャンバスに描画してから処理
+        const src = fullResBitmap || sourceImage;
         const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = sourceImage.width;
-        tempCanvas.height = sourceImage.height;
-        tempCanvas.getContext('2d').drawImage(sourceImage, 0, 0);
+        tempCanvas.width = src.width;
+        tempCanvas.height = src.height;
+        tempCanvas.getContext('2d').drawImage(src, 0, 0);
 
         // 「処理中...」の表示等をしたいところだが、今回は同期的に数１０〜数１００msで終わる
         setTimeout(() => {
