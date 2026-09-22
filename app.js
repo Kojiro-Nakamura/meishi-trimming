@@ -570,15 +570,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const widthB = Math.hypot(points[2].x - points[3].x, points[2].y - points[3].y);
         const estWidth = Math.max(widthT, widthB);
         
-        let dstW = Math.min(Math.round(estWidth), 4500);
+        // 解像度を元のピクセルからさらに1.5倍にオーバーサンプリングしてジャギーを防ぐ
+        let dstW = Math.min(Math.round(estWidth * 1.5), 4500);
         let dstH = Math.round(dstW * (55 / 91));
         
-        // 縦向きの短冊のような選択領域なら縦向き名刺(55:91)にする
         const heightL = Math.hypot(points[3].x - points[0].x, points[3].y - points[0].y);
         const heightR = Math.hypot(points[2].x - points[1].x, points[2].y - points[1].y);
         const estHeight = Math.max(heightL, heightR);
         if (estHeight > estWidth) {
-            dstH = Math.min(Math.round(estHeight), 4500);
+            dstH = Math.min(Math.round(estHeight * 1.5), 4500);
             dstW = Math.round(dstH * (55 / 91));
         }
 
@@ -588,27 +588,46 @@ document.addEventListener('DOMContentLoaded', () => {
             {x: dstW, y: dstH},
             {x: 0, y: dstH}
         ];
-
-        // 変換行列を計算
+        
         const H = getPerspectiveTransform(points, dstPts);
 
-        // 高速化のため、ソース画像を一時キャンバスに描画してから処理
         const src = fullResBitmap || sourceImage;
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = src.width;
         tempCanvas.height = src.height;
         tempCanvas.getContext('2d').drawImage(src, 0, 0);
 
-        // 「処理中...」の表示等をしたいところだが、今回は同期的に数１０〜数１００msで終わる
         setTimeout(() => {
             const warpedCanvas = warpPerspective(tempCanvas, dstW, dstH, H);
             
-            // Base64 (toDataURL) だとiOS Safariのメモリ制限に引っかかり、
-            // プレビュー表示時にブラウザが勝手に低画質化（サブサンプリング）してしまうため、
-            // toBlob と Object URL を使ってフル解像度を維持する。画質も0.95にアップ。
+            // クッキリとした書類にするためのシャープネス処理（アンシャープマスク）
+            const ctx = warpedCanvas.getContext('2d');
+            const imgData = ctx.getImageData(0, 0, dstW, dstH);
+            const data = imgData.data;
+            const w = dstW;
+            const h = dstH;
+            
+            // 簡単な 3x3 シャープネスフィルタ
+            const sharpData = new Uint8ClampedArray(data);
+            for (let y = 1; y < h - 1; y++) {
+                for (let x = 1; x < w - 1; x++) {
+                    const idx = (y * w + x) * 4;
+                    for (let c = 0; c < 3; c++) {
+                        const top = ((y - 1) * w + x) * 4 + c;
+                        const left = (y * w + (x - 1)) * 4 + c;
+                        const right = (y * w + (x + 1)) * 4 + c;
+                        const bottom = ((y + 1) * w + x) * 4 + c;
+                        
+                        const val = data[idx+c] * 5 - data[top] - data[left] - data[right] - data[bottom];
+                        sharpData[idx+c] = val;
+                    }
+                }
+            }
+            ctx.putImageData(new ImageData(sharpData, w, h), 0, 0);
+
             warpedCanvas.toBlob((blob) => {
                 if (blob) {
-                    if (currentDataUrl) URL.revokeObjectURL(currentDataUrl); // メモリ解放
+                    if (currentDataUrl) URL.revokeObjectURL(currentDataUrl);
                     currentDataUrl = URL.createObjectURL(blob);
                     
                     croppedResultImg.src = currentDataUrl;
