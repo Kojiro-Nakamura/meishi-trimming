@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>名刺トリミング</title>
+    <!-- Cropper.js CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <h1>名刺スキャナ</h1>
+        </header>
+        
+        <main>
+            <!-- 初期状態の画面 -->
+            <div id="initial-view" class="view active">
+                <label for="image-input" class="btn primary-btn">
+                    写真を撮る / 選ぶ
+                </label>
+                <input type="file" id="image-input" accept="image/*" capture="environment">
+                <p class="instruction">名刺を撮影してください</p>
+            </div>
+
+            <!-- 編集状態の画面 -->
+            <div id="editor-view" class="view">
+                <div class="cropper-container">
+                    <img id="image-to-crop" src="" alt="Picture">
+                </div>
+                
+                <div class="controls">
+                    <div class="action-buttons">
+                        <button id="rotate-left" class="btn secondary-btn">↺ 左へ回転</button>
+                        <button id="rotate-right" class="btn secondary-btn">↻ 右へ回転</button>
+                    </div>
+                    <button id="save-btn" class="btn primary-btn">トリミングして保存</button>
+                    <button id="cancel-btn" class="btn text-btn">キャンセル</button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Cropper.js JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
