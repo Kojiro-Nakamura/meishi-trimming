@@ -96,6 +96,30 @@ img#image-to-crop {
     display: block; /* imgのデフォルトの隙間を消す */
 }
 
+/* Result View Styles */
+#result-view {
+    background-color: var(--background-color);
+}
+
+.result-container {
+    flex: 1;
+    width: 100%;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+
+img#cropped-result {
+    max-width: 100%;
+    max-height: 100%;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    /* iOSの長押し保存メニューを出しやすくする */
+    -webkit-touch-callout: default;
+}
+
 .controls {
     background-color: var(--white);
     padding: 16px;

@@ -35,8 +35,23 @@
                         <button id="rotate-left" class="btn secondary-btn">↺ 左へ回転</button>
                         <button id="rotate-right" class="btn secondary-btn">↻ 右へ回転</button>
                     </div>
-                    <button id="save-btn" class="btn primary-btn">トリミングして保存</button>
+                    <button id="save-btn" class="btn primary-btn">トリミングを完了</button>
                     <button id="cancel-btn" class="btn text-btn">キャンセル</button>
+                </div>
+            </div>
+
+            <!-- 結果・保存画面 -->
+            <div id="result-view" class="view">
+                <div class="result-container">
+                    <img id="cropped-result" src="" alt="Cropped Result">
+                </div>
+                <div class="controls">
+                    <p class="instruction" style="margin-bottom: 12px; font-weight: bold; color: #ff3b30;">
+                        ↓ 画像を長押しして「写真に追加」または「保存」を選択してください
+                    </p>
+                    <button id="download-btn" class="btn primary-btn">ファイルとして保存 (PC/Android)</button>
+                    <button id="back-to-edit-btn" class="btn secondary-btn">編集に戻る</button>
+                    <button id="start-over-btn" class="btn text-btn">最初からやり直す</button>
                 </div>
             </div>
         </main>

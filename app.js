@@ -11,6 +11,14 @@ document.addEventListener('DOMContentLoaded', () => {
     let cropper = null;
     let originalFileName = 'business_card.jpg';
 
+    const resultView = document.getElementById('result-view');
+    const croppedResultImg = document.getElementById('cropped-result');
+    const downloadBtn = document.getElementById('download-btn');
+    const backToEditBtn = document.getElementById('back-to-edit-btn');
+    const startOverBtn = document.getElementById('start-over-btn');
+    
+    let currentDataUrl = null;
+
     // ファイルが選択されたときの処理
     imageInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
@@ -26,6 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // ビューの切り替え
             initialView.classList.remove('active');
+            resultView.classList.remove('active');
             editorView.classList.add('active');
 
             // 既存のCropperがあれば破棄
@@ -63,13 +72,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cropper) cropper.rotate(90);
     });
 
-    // キャンセルボタン
-    cancelBtn.addEventListener('click', () => {
-        // ビューを元に戻す
+    const resetToInitial = () => {
         editorView.classList.remove('active');
+        resultView.classList.remove('active');
         initialView.classList.add('active');
         
-        // 入力のリセット
         imageInput.value = '';
         
         if (cropper) {
@@ -77,9 +84,23 @@ document.addEventListener('DOMContentLoaded', () => {
             cropper = null;
         }
         imageElement.src = '';
+        croppedResultImg.src = '';
+        currentDataUrl = null;
+    };
+
+    // キャンセルボタン
+    cancelBtn.addEventListener('click', resetToInitial);
+
+    // やり直すボタン
+    startOverBtn.addEventListener('click', resetToInitial);
+
+    // 編集に戻るボタン
+    backToEditBtn.addEventListener('click', () => {
+        resultView.classList.remove('active');
+        editorView.classList.add('active');
     });
 
-    // 保存ボタン
+    // トリミング完了ボタン (SaveBtn)
     saveBtn.addEventListener('click', () => {
         if (!cropper) return;
 
@@ -96,11 +117,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // 画質を指定してデータURLに変換
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+        currentDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+        // 結果画面に画像を表示
+        croppedResultImg.src = currentDataUrl;
+
+        // ビューの切り替え
+        editorView.classList.remove('active');
+        resultView.classList.add('active');
+    });
+
+    // ファイルとして保存ボタン (DownloadBtn)
+    downloadBtn.addEventListener('click', () => {
+        if (!currentDataUrl) return;
 
         // ダウンロード用のリンクを作成してクリックする
         const a = document.createElement('a');
-        a.href = dataUrl;
+        a.href = currentDataUrl;
         
         // ファイル名を生成（元のファイル名 + _cropped.jpg）
         const nameParts = originalFileName.split('.');
