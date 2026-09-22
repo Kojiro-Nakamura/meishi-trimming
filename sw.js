@@ -1,5 +1,5 @@
 
-const CACHE_NAME = 'meishi-scanner-v1.0.11';
+const CACHE_NAME = 'meishi-scanner-v1.0.12';
 const urlsToCache = [
   './',
   './index.html',
@@ -34,7 +34,7 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   event.respondWith(
-    caches.match(event.request)
+    caches.match(event.request, { ignoreSearch: true })
       .then(response => {
         // Cache hit - return response
         if (response) {
