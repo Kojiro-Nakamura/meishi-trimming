@@ -59,149 +59,123 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function detectDocument(imgElement) {
-        // OpenCVが完全に初期化されていない場合はスキップ
-        if (typeof cv === 'undefined' || !cv.Mat || !cv.imread) {
-            logDebug("OpenCV is not ready yet.");
-            return null;
-        }
-
         try {
-            logDebug("Start detecting...");
-            // メモリ制限(iOS Safari)を回避するため、OpenCVに渡す前にCanvasで縮小する
-            let maxDim = 800;
+            logDebug("Start Pure JS detection...");
+            const maxDim = 400; // 処理速度優先で小さめにリサイズ
             let scale = 1.0;
             if (imgElement.width > maxDim || imgElement.height > maxDim) {
                 scale = maxDim / Math.max(imgElement.width, imgElement.height);
             }
             
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = imgElement.width * scale;
-            tempCanvas.height = imgElement.height * scale;
-            const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
-            tempCtx.drawImage(imgElement, 0, 0, tempCanvas.width, tempCanvas.height);
-
-            // 縮小済みのCanvasからOpenCVのMatを生成 (超軽量・高速)
-            let src = cv.imread(tempCanvas);
-            let resized = src; // すでにリサイズ済みなのでそのまま使用
+            const w = Math.round(imgElement.width * scale);
+            const h = Math.round(imgElement.height * scale);
             
-            let gray = new cv.Mat();
-            cv.cvtColor(resized, gray, cv.COLOR_RGBA2GRAY, 0);
-            // ノイズ除去
-            cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
-
-            // 二値化 (Otsu's Thresholding)
-            // 白黒がはっきりしている環境（黒い下地に白い名刺など）で非常に強力
-            let edges = new cv.Mat();
-            cv.threshold(gray, edges, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU);
-
-            // 輪郭を閉じて繋がりを良くする (Morphological Close)
-            let M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
-            cv.morphologyEx(edges, edges, cv.MORPH_CLOSE, M);
-            M.delete();
-
-            // 輪郭検出
-            let contours = new cv.MatVector();
-            let hierarchy = new cv.Mat();
-            cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
-
-            let maxArea = 0;
-            let maxContour = null;
-            let isMinAreaRect = false;
-            let approx = new cv.Mat();
-            const totalArea = resized.cols * resized.rows;
-
-            logDebug(`Found ${contours.size()} contours`);
-
-            for (let i = 0; i < contours.size(); ++i) {
-                let cnt = contours.get(i);
-                let area = cv.contourArea(cnt);
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = w;
+            tempCanvas.height = h;
+            const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+            tempCtx.drawImage(imgElement, 0, 0, w, h);
+            
+            const imgData = tempCtx.getImageData(0, 0, w, h);
+            const data = imgData.data;
+            const length = w * h;
+            const gray = new Uint8Array(length);
+            
+            // 1. グレースケール化
+            for (let i = 0; i < length; i++) {
+                const r = data[i * 4];
+                const g = data[i * 4 + 1];
+                const b = data[i * 4 + 2];
+                gray[i] = 0.299 * r + 0.587 * g + 0.114 * b;
+            }
+            
+            // 2. 大津の二値化 (Otsu's Thresholding) の閾値計算
+            let hist = new Array(256).fill(0);
+            for (let i = 0; i < length; i++) hist[gray[i]]++;
+            
+            let sum = 0;
+            for (let i = 0; i < 256; i++) sum += i * hist[i];
+            
+            let sumB = 0, wB = 0, wF = 0, maxVar = 0, threshold = 0;
+            for (let i = 0; i < 256; i++) {
+                wB += hist[i];
+                if (wB === 0) continue;
+                wF = length - wB;
+                if (wF === 0) break;
                 
-                // 画面全体の5%以上、99%未満の領域のみ
-                if (area > totalArea * 0.05 && area < totalArea * 0.99) {
-                    let hull = new cv.Mat();
-                    // cntのポイントが3未満だとconvexHullがエラーを吐くのでガード
-                    if (cnt.rows >= 3) {
-                        cv.convexHull(cnt, hull, false, true);
-
-                        let perimeter = cv.arcLength(hull, true);
-                        let found4 = false;
-                        
-                        // 精度を変えながら4角形になるか試行する
-                        for (let ep = 0.01; ep <= 0.15; ep += 0.01) {
-                            cv.approxPolyDP(hull, approx, ep * perimeter, true);
-                            if (approx.rows === 4) {
-                                found4 = true;
-                                break;
-                            }
-                        }
-                        
-                        if (found4) {
-                            if (area > maxArea) {
-                                maxArea = area;
-                                if (maxContour) maxContour.delete();
-                                maxContour = approx.clone();
-                                isMinAreaRect = false;
-                            }
-                        } else {
-                            // 4角形が見つからなかった場合でも、面積が最大なら「最小外接矩形」をフォールバックとして保持
-                            if (area > maxArea) {
-                                maxArea = area;
-                                if (maxContour) maxContour.delete();
-                                maxContour = hull.clone();
-                                isMinAreaRect = true;
-                            }
-                        }
-                    }
-                    hull.delete();
+                sumB += i * hist[i];
+                let mB = sumB / wB;
+                let mF = (sum - sumB) / wF;
+                let varBetween = wB * wF * (mB - mF) * (mB - mF);
+                
+                if (varBetween > maxVar) {
+                    maxVar = varBetween;
+                    threshold = i;
                 }
-                cnt.delete();
             }
+            
+            logDebug(`Otsu threshold: ${threshold}`);
 
-            let foundPoints = null;
-            if (maxContour) {
-                foundPoints = [];
-                if (!isMinAreaRect) {
-                    logDebug(`Using 4-point approx. Area: ${Math.round(maxArea)}`);
-                    for (let i = 0; i < 4; i++) {
-                        foundPoints.push({
-                            x: maxContour.data32S[i * 2] / scale,
-                            y: maxContour.data32S[i * 2 + 1] / scale
-                        });
-                    }
-                } else {
-                    logDebug(`Using minAreaRect. Area: ${Math.round(maxArea)}`);
-                    let rect = cv.minAreaRect(maxContour);
-                    let angle = rect.angle * Math.PI / 180.0;
-                    let b = Math.cos(angle) * 0.5;
-                    let a = Math.sin(angle) * 0.5;
-                    let pt0 = { x: rect.center.x - a * rect.size.height - b * rect.size.width,
-                                y: rect.center.y + b * rect.size.height - a * rect.size.width };
-                    let pt1 = { x: rect.center.x + a * rect.size.height - b * rect.size.width,
-                                y: rect.center.y - b * rect.size.height - a * rect.size.width };
-                    let pt2 = { x: 2 * rect.center.x - pt0.x, y: 2 * rect.center.y - pt0.y };
-                    let pt3 = { x: 2 * rect.center.x - pt1.x, y: 2 * rect.center.y - pt1.y };
+            // 画像中心のピクセルが明るいか暗いかで、名刺が白か黒かを判定
+            let centerVal = gray[Math.floor(h / 2) * w + Math.floor(w / 2)];
+            let isCardBright = centerVal > threshold;
+            
+            // 3. 4つの角（極値）を探す
+            let minSum = Infinity, maxSum = -Infinity;
+            let minDiff = Infinity, maxDiff = -Infinity;
+            let tl = null, br = null, tr = null, bl = null;
+            
+            let fgCount = 0;
+
+            for (let y = 1; y < h - 1; y++) {
+                for (let x = 1; x < w - 1; x++) {
+                    let val = gray[y * w + x];
+                    let isForeground = isCardBright ? (val > threshold) : (val <= threshold);
                     
-                    foundPoints = [pt0, pt1, pt2, pt3].map(p => ({
-                        x: p.x / scale,
-                        y: p.y / scale
-                    }));
+                    if (isForeground) {
+                        // ノイズ除去 (Erosion相当): 周囲3x3ピクセルに十分な前景ピクセルがあるか
+                        let count = 0;
+                        for(let dy = -1; dy <= 1; dy++) {
+                            for(let dx = -1; dx <= 1; dx++) {
+                                let nval = gray[(y + dy) * w + (x + dx)];
+                                if (isCardBright ? (nval > threshold) : (nval <= threshold)) count++;
+                            }
+                        }
+                        if (count < 7) continue; // 孤立したノイズは無視
+
+                        fgCount++;
+                        let sumCoord = x + y;
+                        let diffCoord = x - y;
+                        
+                        if (sumCoord < minSum) { minSum = sumCoord; tl = {x, y}; }
+                        if (sumCoord > maxSum) { maxSum = sumCoord; br = {x, y}; }
+                        if (diffCoord > maxDiff) { maxDiff = diffCoord; tr = {x, y}; }
+                        if (diffCoord < minDiff) { minDiff = diffCoord; bl = {x, y}; }
+                    }
                 }
-                maxContour.delete();
-            } else {
-                logDebug("No contour met size criteria");
             }
-
-            // メモリ解放
-            src.delete(); gray.delete(); edges.delete();
-            contours.delete(); hierarchy.delete(); approx.delete();
-
-            if (foundPoints) {
-                return sortPoints(foundPoints);
+            
+            // 前景が極端に小さい、または大きすぎる場合はエラーとする
+            if (fgCount < length * 0.05 || fgCount > length * 0.98) {
+                logDebug(`Area out of bounds: ${Math.round(fgCount/length*100)}%`);
+                return null;
             }
+            
+            if (tl && tr && br && bl) {
+                logDebug("Pure JS detection success!");
+                return [
+                    {x: tl.x / scale, y: tl.y / scale},
+                    {x: tr.x / scale, y: tr.y / scale},
+                    {x: br.x / scale, y: br.y / scale},
+                    {x: bl.x / scale, y: bl.y / scale}
+                ];
+            }
+            
+            logDebug("Could not find corners.");
             return null;
         } catch (err) {
-            logDebug("OpenCV err: " + err);
-            console.error("OpenCV detection failed", err);
+            logDebug("PureJS err: " + err);
+            console.error(err);
             return null;
         }
     }
@@ -222,32 +196,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 {x: marginX, y: sourceImage.height - marginY} // Bottom-Left
             ];
 
-            // OpenCVのロードが遅れている場合を考慮し、リトライ付きで自動認識を実行
-            const tryDetect = (retries) => {
-                if (typeof cv === 'undefined' || !cv.Mat || !cv.imread) {
-                    if (retries > 0) {
-                        logDebug(`Waiting for OpenCV... (${retries})`);
-                        setTimeout(() => tryDetect(retries - 1), 1000);
-                    } else {
-                        logDebug("OpenCV load timeout.");
-                    }
-                    return;
-                }
+            logDebug("Image loaded.");
+            
+            // OpenCV依存を無くしたため、すぐに同期的/非同期的に実行可能
+            setTimeout(() => {
                 const detectedPoints = detectDocument(sourceImage);
                 if (detectedPoints) {
                     points = detectedPoints;
-                    logDebug("Auto-crop success!");
-                    // 非同期でポイントが更新された場合、再描画
                     if (editorView.classList.contains('active')) {
                         drawEditor();
                     }
-                } else {
-                    logDebug("Auto-crop found nothing.");
                 }
-            };
-            
-            logDebug("Image loaded.");
-            tryDetect(10); // 最大10秒間待機してOpenCVをロード
+            }, 10);
 
             // DOMの表示が完了してからキャンバスサイズを計算するため少し遅延させる
             setTimeout(resizeCanvas, 50);
