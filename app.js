@@ -38,13 +38,108 @@ document.addEventListener('DOMContentLoaded', () => {
         loadImage(objectUrl);
     });
 
+    function sortPoints(pts) {
+        const sum = pts.map(p => p.x + p.y);
+        const diff = pts.map(p => p.x - p.y);
+        
+        const tl = pts[sum.indexOf(Math.min(...sum))];
+        const br = pts[sum.indexOf(Math.max(...sum))];
+        const tr = pts[diff.indexOf(Math.max(...diff))];
+        const bl = pts[diff.indexOf(Math.min(...diff))];
+        
+        return [tl, tr, br, bl];
+    }
+
+    function detectDocument(imgElement) {
+        // OpenCVが未ロード、またはエラーの場合はnullを返す
+        if (typeof cv === 'undefined' || !cv.Mat) {
+            return null;
+        }
+
+        try {
+            let src = cv.imread(imgElement);
+            
+            // 処理高速化のため画像をダウンサンプリング
+            let maxDim = 800;
+            let scale = 1.0;
+            let resized = new cv.Mat();
+            if (src.cols > maxDim || src.rows > maxDim) {
+                scale = maxDim / Math.max(src.cols, src.rows);
+                cv.resize(src, resized, new cv.Size(0, 0), scale, scale, cv.INTER_AREA);
+            } else {
+                src.copyTo(resized);
+            }
+
+            let gray = new cv.Mat();
+            cv.cvtColor(resized, gray, cv.COLOR_RGBA2GRAY, 0);
+            // ノイズ除去
+            cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+
+            // エッジ検出
+            let edges = new cv.Mat();
+            cv.Canny(gray, edges, 75, 200);
+
+            // 輪郭検出
+            let contours = new cv.MatVector();
+            let hierarchy = new cv.Mat();
+            cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+            let maxArea = 0;
+            let maxContour = null;
+            let approx = new cv.Mat();
+
+            for (let i = 0; i < contours.size(); ++i) {
+                let cnt = contours.get(i);
+                let area = cv.contourArea(cnt);
+                // ある程度大きい領域のみ
+                if (area > 5000) {
+                    let perimeter = cv.arcLength(cnt, true);
+                    cv.approxPolyDP(cnt, approx, 0.02 * perimeter, true);
+                    // 四角形の場合
+                    if (approx.rows === 4) {
+                        if (area > maxArea) {
+                            maxArea = area;
+                            if (maxContour) maxContour.delete();
+                            maxContour = approx.clone();
+                        }
+                    }
+                }
+                cnt.delete();
+            }
+
+            let foundPoints = null;
+            if (maxContour) {
+                foundPoints = [];
+                for (let i = 0; i < 4; i++) {
+                    foundPoints.push({
+                        x: maxContour.data32S[i * 2] / scale,
+                        y: maxContour.data32S[i * 2 + 1] / scale
+                    });
+                }
+                maxContour.delete();
+            }
+
+            // メモリ解放
+            src.delete(); resized.delete(); gray.delete(); edges.delete();
+            contours.delete(); hierarchy.delete(); approx.delete();
+
+            if (foundPoints) {
+                return sortPoints(foundPoints);
+            }
+            return null;
+        } catch (err) {
+            console.error("OpenCV detection failed", err);
+            return null;
+        }
+    }
+
     function loadImage(src) {
         sourceImage.onload = () => {
             initialView.classList.remove('active');
             resultView.classList.remove('active');
             editorView.classList.add('active');
 
-            // 4隅のポイントを初期化 (画像の少し内側)
+            // 4隅のポイントを初期化 (フォールバック用)
             const marginX = sourceImage.width * 0.1;
             const marginY = sourceImage.height * 0.1;
             points = [
@@ -53,6 +148,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 {x: sourceImage.width - marginX, y: sourceImage.height - marginY}, // Bottom-Right
                 {x: marginX, y: sourceImage.height - marginY} // Bottom-Left
             ];
+
+            // 自動認識に挑戦
+            const detectedPoints = detectDocument(sourceImage);
+            if (detectedPoints) {
+                points = detectedPoints;
+            }
 
             // DOMの表示が完了してからキャンバスサイズを計算するため少し遅延させる
             setTimeout(resizeCanvas, 50);
