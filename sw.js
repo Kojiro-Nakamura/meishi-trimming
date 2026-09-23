@@ -1,10 +1,12 @@
 
-const CACHE_NAME = 'meishi-scanner-v1.0.12';
+const CACHE_NAME = 'meishi-scanner-v1.0.13';
 const urlsToCache = [
   './',
   './index.html',
   './style.css',
-  './app.js'
+  './app.js',
+  './manifest.json',
+  './icon.svg'
 ];
 
 self.addEventListener('install', event => {
