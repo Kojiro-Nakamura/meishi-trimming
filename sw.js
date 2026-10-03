@@ -1,5 +1,5 @@
 
-const CACHE_NAME = 'meishi-scanner-v1.0.13';
+const CACHE_NAME = 'meishi-scanner-v1.0.14';
 const urlsToCache = [
   './',
   './index.html',
